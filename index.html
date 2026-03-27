@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Push Notify</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <!-- jose for JWT signing in browser -->
+  <script src="https://cdn.jsdelivr.net/npm/jose@5.9.6/dist/browser/index.umd.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0a0f;
+      --surface:  #13131a;
+      --border:   #2a2a3a;
+      --accent:   #5dffb8;
+      --accent2:  #ff5d8f;
+      --text:     #e8e8f0;
+      --muted:    #666680;
+      --radius:   12px;
+      --font-mono: 'Space Mono', monospace;
+      --font-body: 'DM Sans', sans-serif;
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-weight: 300;
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(93,255,184,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(93,255,184,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Glowing orb */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(circle, rgba(93,255,184,0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 60px 20px 80px;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 56px;
+    }
+
+    .header .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      color: var(--accent);
+      border: 1px solid rgba(93,255,184,0.25);
+      padding: 5px 14px;
+      border-radius: 100px;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+    }
+
+    .header .badge::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    .header h1 {
+      font-family: var(--font-mono);
+      font-size: clamp(32px, 5vw, 52px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      color: #fff;
+    }
+
+    .header h1 span { color: var(--accent); }
+
+    .header p {
+      margin-top: 14px;
+      font-size: 15px;
+      color: var(--muted);
+      max-width: 420px;
+      line-height: 1.6;
+    }
+
+    /* Card */
+    .card {
+      width: 100%;
+      max-width: 560px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(93,255,184,0.04), 0 40px 80px rgba(0,0,0,0.5);
+    }
+
+    .card-header {
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+
+    .card-header .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+
+    .card-header .dot.r { background: #ff5f57; }
+    .card-header .dot.y { background: #febc2e; }
+    .card-header .dot.g { background: #28c840; }
+
+    .card-body { padding: 32px 28px; }
+
+    /* Step indicator */
+    .steps {
+      display: flex;
+      gap: 0;
+      margin-bottom: 32px;
+    }
+
+    .step {
+      flex: 1;
+      text-align: center;
+      position: relative;
+    }
+
+    .step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 15px;
+      left: 50%;
+      width: 100%;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .step.active:not(:last-child)::after,
+    .step.done:not(:last-child)::after {
+      background: var(--accent);
+      opacity: 0.4;
+    }
+
+    .step-circle {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--bg);
+      position: relative;
+      z-index: 1;
+      color: var(--muted);
+      transition: all 0.3s;
+    }
+
+    .step.active .step-circle {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(93,255,184,0.08);
+    }
+
+    .step.done .step-circle {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #000;
+    }
+
+    .step-label {
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .step.active .step-label { color: var(--accent); }
+
+    /* Sections */
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* File upload zone */
+    .upload-zone {
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s;
+      position: relative;
+    }
+
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: rgba(93,255,184,0.04); }
+
+    .upload-zone input[type=file] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+
+    .upload-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .upload-zone h3 {
+      font-size: 15px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .upload-zone p {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .upload-zone.loaded {
+      border-style: solid;
+      border-color: var(--accent);
+      background: rgba(93,255,184,0.06);
+    }
+
+    .upload-zone.loaded h3 { color: var(--accent); }
+
+    /* Token input */
+    .field-group { margin-bottom: 20px; }
+
+    .field-group label {
+      display: block;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .field-group input,
+    .field-group textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-family: var(--font-body);
+      font-size: 15px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      resize: none;
+    }
+
+    .field-group input::placeholder,
+    .field-group textarea::placeholder { color: var(--muted); }
+
+    .field-group input:focus,
+    .field-group textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(93,255,184,0.08);
+    }
+
+    .field-group textarea { height: 100px; line-height: 1.6; }
+
+    /* Character counter */
+    .field-meta {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    /* Hint box */
+    .hint {
+      background: rgba(93,255,184,0.05);
+      border: 1px solid rgba(93,255,184,0.15);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .hint strong { color: var(--accent); font-weight: 500; }
+
+    /* Buttons */
+    .btn {
+      width: 100%;
+      padding: 15px;
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #fff;
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(93,255,184,0.25);
+    }
+
+    .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      margin-top: 10px;
+    }
+
+    .btn-ghost:hover { color: var(--text); border-color: var(--text); }
+
+    .btn.loading .btn-text { display: none; }
+    .btn.loading .btn-loader { display: block; }
+    .btn-loader { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(0,0,0,0.3);
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+
+    /* Toast */
+    .toast-wrap {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 1000;
+    }
+
+    .toast {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      min-width: 280px;
+      max-width: 360px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      animation: slideIn 0.3s ease;
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(30px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+
+    .toast.success { border-color: rgba(93,255,184,0.3); }
+    .toast.error   { border-color: rgba(255,93,143,0.3); }
+
+    .toast-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .toast-title { font-weight: 500; color: var(--text); }
+    .toast-msg { color: var(--muted); font-size: 12.5px; }
+
+    /* Response preview */
+    .response-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 16px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 120px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    /* Device token list */
+    .token-list-wrap { margin-top: 16px; }
+
+    .token-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+
+    .token-item span {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .token-remove {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 2px;
+      transition: color 0.2s;
+    }
+
+    .token-remove:hover { color: var(--accent2); }
+
+    .add-token-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .add-token-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      outline: none;
+    }
+
+    .add-token-row input:focus { border-color: var(--accent); }
+    .add-token-row input::placeholder { color: var(--muted); }
+
+    .btn-sm {
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .btn-sm:hover { background: var(--accent); color: #000; }
+
+    .empty-tokens {
+      text-align: center;
+      padding: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 48px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .footer a { color: var(--accent); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="badge">FCM Push Sender</div>
+    <h1>Push<span>Notify</span></h1>
+    <p>Send Firebase Cloud Messaging notifications to your Flutter app directly from your browser.</p>
+  </div>
+
+  <!-- Main Card -->
+  <div class="card">
+
+    <div class="card-header">
+      <span class="dot r"></span>
+      <span class="dot y"></span>
+      <span class="dot g"></span>
+      <span style="margin-left:8px;">push_notify.config</span>
+    </div>
+
+    <div class="card-body">
+
+      <!-- Step Indicator -->
+      <div class="steps">
+        <div class="step active" id="step1">
+          <div class="step-circle">1</div>
+          <div class="step-label">Service&nbsp;Account</div>
+        </div>
+        <div class="step" id="step2">
+          <div class="step-circle">2</div>
+          <div class="step-label">Device&nbsp;Tokens</div>
+        </div>
+        <div class="step" id="step3">
+          <div class="step-circle">3</div>
+          <div class="step-label">Notification</div>
+        </div>
+      </div>
+
+      <!-- Section 1: Service Account -->
+      <div class="section active" id="sec1">
+        <div class="hint">
+          <strong>How it works:</strong> Your service account JSON is read locally in your browser — it is never uploaded to any server. All FCM requests are made directly from your browser to Google's API.
+        </div>
+
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="saFile" accept=".json" />
+          <span class="upload-icon">📂</span>
+          <h3 id="uploadTitle">Drop your serviceaccount.json</h3>
+          <p id="uploadSub">or click to browse · JSON files only</p>
+        </div>
+
+        <button class="btn btn-primary" id="btn1" style="margin-top:20px;" disabled>
+          <span class="btn-text">Continue →</span>
+        </button>
+      </div>
+
+      <!-- Section 2: Device Tokens -->
+      <div class="section" id="sec2">
+        <div class="hint">
+          Add one or more FCM device tokens from your Flutter app. All selected tokens will receive the notification.
+        </div>
+
+        <div id="tokenList" class="token-list-wrap">
+          <div class="empty-tokens" id="emptyMsg">No tokens added yet.</div>
+        </div>
+
+        <div class="add-token-row">
+          <input type="text" id="tokenInput" placeholder="Paste FCM device token…" />
+          <button class="btn-sm" onclick="addToken()">+ Add</button>
+        </div>
+
+        <button class="btn btn-primary" id="btn2" style="margin-top:20px;" disabled>
+          <span class="btn-text">Continue →</span>
+        </button>
+        <button class="btn btn-ghost" onclick="goStep(1)">← Back</button>
+      </div>
+
+      <!-- Section 3: Notification -->
+      <div class="section" id="sec3">
+
+        <div class="field-group">
+          <label>Notification Title</label>
+          <input type="text" id="notifTitle" maxlength="100" placeholder="e.g. New message from Alex" oninput="updateCounter('notifTitle','titleCount')" />
+          <div class="field-meta"><span id="titleCount">0</span>/100</div>
+        </div>
+
+        <div class="field-group">
+          <label>Notification Body</label>
+          <textarea id="notifBody" maxlength="300" placeholder="e.g. Hey! Check out the latest updates in the app." oninput="updateCounter('notifBody','bodyCount')"></textarea>
+          <div class="field-meta"><span id="bodyCount">0</span>/300</div>
+        </div>
+
+        <button class="btn btn-primary" id="sendBtn" onclick="sendNotification()">
+          <span class="btn-text">🚀 Send Notification</span>
+          <span class="btn-loader"><span class="spinner"></span> Sending…</span>
+        </button>
+        <button class="btn btn-ghost" onclick="goStep(2)">← Back</button>
+
+        <div class="response-box" id="responseBox"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footer">
+    Runs entirely in your browser · No data leaves your device ·
+    <a href="https://firebase.google.com/docs/cloud-messaging" target="_blank">FCM Docs</a>
+  </div>
+
+</div>
+
+<!-- Toast Container -->
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let serviceAccount = null;
+let tokens = [];
+let currentStep = 1;
+
+// ─── Step navigation ──────────────────────────────────────────────────────────
+function goStep(n) {
+  document.getElementById('sec' + currentStep).classList.remove('active');
+  document.getElementById('step' + currentStep).classList.remove('active');
+  document.getElementById('step' + currentStep).classList.add('done');
+
+  if (n < currentStep) {
+    // going back — un-done steps after n
+    for (let i = n; i <= 3; i++) {
+      document.getElementById('step' + i).classList.remove('done');
+    }
+  }
+
+  currentStep = n;
+  document.getElementById('sec' + n).classList.add('active');
+  document.getElementById('step' + n).classList.remove('done');
+  document.getElementById('step' + n).classList.add('active');
+}
+
+// ─── Service account file ─────────────────────────────────────────────────────
+document.getElementById('saFile').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      serviceAccount = JSON.parse(ev.target.result);
+      if (!serviceAccount.private_key || !serviceAccount.client_email || !serviceAccount.project_id) {
+        throw new Error('Missing required fields');
+      }
+      document.getElementById('uploadZone').classList.add('loaded');
+      document.getElementById('uploadTitle').textContent = '✓ ' + file.name;
+      document.getElementById('uploadSub').textContent = 'Project: ' + serviceAccount.project_id;
+      document.getElementById('btn1').disabled = false;
+    } catch(err) {
+      toast('error', 'Invalid JSON', 'This does not look like a valid service account file.');
+      serviceAccount = null;
+    }
+  };
+  reader.readAsText(file);
+});
+
+// Drag & drop
+const zone = document.getElementById('uploadZone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('saFile').files = dt.files;
+    document.getElementById('saFile').dispatchEvent(new Event('change'));
+  }
+});
+
+document.getElementById('btn1').addEventListener('click', () => goStep(2));
+
+// ─── Device tokens ────────────────────────────────────────────────────────────
+function addToken() {
+  const input = document.getElementById('tokenInput');
+  const val = input.value.trim();
+  if (!val) return;
+  if (tokens.includes(val)) { toast('error', 'Duplicate', 'This token is already added.'); return; }
+  tokens.push(val);
+  input.value = '';
+  renderTokens();
+  document.getElementById('btn2').disabled = tokens.length === 0;
+}
+
+document.getElementById('tokenInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addToken();
+});
+
+function removeToken(i) {
+  tokens.splice(i, 1);
+  renderTokens();
+  document.getElementById('btn2').disabled = tokens.length === 0;
+}
+
+function renderTokens() {
+  const list = document.getElementById('tokenList');
+  const empty = document.getElementById('emptyMsg');
+  // remove old items
+  list.querySelectorAll('.token-item').forEach(el => el.remove());
+
+  if (tokens.length === 0) {
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    tokens.forEach((t, i) => {
+      const div = document.createElement('div');
+      div.className = 'token-item';
+      div.innerHTML = `
+        <span title="${t}">${t.substring(0,40)}…</span>
+        <button class="token-remove" title="Remove" onclick="removeToken(${i})">×</button>
+      `;
+      list.appendChild(div);
+    });
+  }
+}
+
+document.getElementById('btn2').addEventListener('click', () => goStep(3));
+
+// ─── Character counters ───────────────────────────────────────────────────────
+function updateCounter(inputId, countId) {
+  const len = document.getElementById(inputId).value.length;
+  document.getElementById(countId).textContent = len;
+}
+
+// ─── Get OAuth2 access token using service account ───────────────────────────
+async function getAccessToken() {
+  const { private_key, client_email } = serviceAccount;
+
+  // Build JWT
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: client_email,
+    sub: client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging'
+  };
+
+  // Import private key
+  const keyData = private_key.replace(/\\n/g, '\n');
+  const privateKey = await jose.importPKCS8(keyData, 'RS256');
+
+  // Sign JWT
+  const jwt = await new jose.SignJWT(payload)
+    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+    .sign(privateKey);
+
+  // Exchange for access token
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    })
+  });
+
+  if (!tokenRes.ok) {
+    const err = await tokenRes.json();
+    throw new Error(err.error_description || 'Failed to get access token');
+  }
+
+  const tokenData = await tokenRes.json();
+  return tokenData.access_token;
+}
+
+// ─── Send notification ────────────────────────────────────────────────────────
+async function sendNotification() {
+  const title = document.getElementById('notifTitle').value.trim();
+  const body  = document.getElementById('notifBody').value.trim();
+
+  if (!title || !body) {
+    toast('error', 'Missing Fields', 'Please fill in both title and body.');
+    return;
+  }
+
+  const btn = document.getElementById('sendBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+
+  const responseBox = document.getElementById('responseBox');
+  responseBox.style.display = 'none';
+
+  try {
+    const accessToken = await getAccessToken();
+    const projectId = serviceAccount.project_id;
+    const fcmUrl = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+
+    const results = [];
+
+    for (const token of tokens) {
+      const payload = {
+        message: {
+          token: token,
+          notification: { title, body }
+        }
+      };
+
+      const res = await fetch(fcmUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      results.push({ token: token.substring(0, 20) + '…', ok: res.ok, data });
+    }
+
+    const failed = results.filter(r => !r.ok);
+    const succeeded = results.filter(r => r.ok);
+
+    responseBox.textContent = JSON.stringify(results, null, 2);
+    responseBox.style.display = 'block';
+
+    if (failed.length === 0) {
+      toast('success', 'Sent! 🎉', `Notification delivered to ${succeeded.length} device${succeeded.length > 1 ? 's' : ''}.`);
+    } else {
+      toast('error', 'Partial Failure', `${succeeded.length} succeeded, ${failed.length} failed. See details below.`);
+    }
+
+  } catch(err) {
+    console.error(err);
+    responseBox.textContent = err.message;
+    responseBox.style.display = 'block';
+    toast('error', 'Error', err.message);
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function toast(type, title, msg) {
+  const wrap = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.innerHTML = `
+    <span class="toast-icon">${type === 'success' ? '✅' : '❌'}</span>
+    <div>
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${msg}</div>
+    </div>
+  `;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+</script>
+</body>
+</html>
