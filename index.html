@@ -783,6 +783,7 @@ function updateCounter(inputId, countId) {
 // ─── Get OAuth2 access token using service account ───────────────────────────
 async function getAccessToken() {
   const { private_key, client_email } = serviceAccount;
+  const { importPKCS8, SignJWT } = window.jose;
 
   // Build JWT
   const now = Math.floor(Date.now() / 1000);
